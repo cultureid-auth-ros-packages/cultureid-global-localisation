@@ -1,0 +1,35 @@
+<launch>
+
+  <arg name="gazebo_world"              default="csal_pgl" />
+
+  <!-- turtlebot | rb1-->
+  <arg name="robot_type"                default="turtlebot" />
+
+  <!-- visualisation is not necessarily necessary -->
+  <arg name="do_viz"                    default="true" />
+
+  <arg name="num_hypotheses"            default="100" />
+  <arg name="do_global_localisation"    default="true" />
+
+  <include file="$(find cultureid_devel)/launch/robot/$(arg robot_type)_bringup_live.launch" />
+  <include file="$(find cultureid_devel)/launch/avanti_live.launch">
+    <arg name="num_hypotheses"          value="$(arg num_hypotheses)"/>
+    <arg name="do_global_localisation"  value="$(arg do_global_localisation)"/>
+  </include>
+
+  <!-- Execute fmt globalisation -->
+  <include file="$(find cultureid_global_localisation)/launch/cultureid_global_localisation.launch">
+    <arg name="gazebo_world" value="$(arg gazebo_world)" />
+    <arg name="robot_type"   value="$(arg robot_type)" />
+  </include>
+
+
+  <!-- Launch logger
+   -->
+  <include file="$(find cultureid_global_localisation)/launch/cultureid_global_localisation_logger.launch">
+    <arg name="gazebo_world" value="$(arg gazebo_world)" />
+  </include>
+
+  <node name="rviz" pkg="rviz" type="rviz" output="log" args="" />
+
+</launch>
