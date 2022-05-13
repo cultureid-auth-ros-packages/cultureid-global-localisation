@@ -8,7 +8,7 @@
   <!-- visualisation is not necessarily necessary -->
   <arg name="do_viz"                    default="true" />
 
-  <arg name="num_hypotheses"            default="100" />
+  <arg name="num_hypotheses"            default="1000" />
   <arg name="do_global_localisation"    default="true" />
 
   <include file="$(find cultureid_devel)/launch/robot/$(arg robot_type)_bringup_live.launch" />

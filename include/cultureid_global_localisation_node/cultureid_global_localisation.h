@@ -46,6 +46,8 @@
 #include <cmath>
 #include <iostream>
 #include <time.h>
+#include <numeric> // std::iota
+#include <algorithm> // std::sort, std::stable_sort
 #include <boost/random/normal_distribution.hpp>
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/variate_generator.hpp>
@@ -145,6 +147,9 @@ class CultureidGlobalLocalisation
     std::string input_pose_cloud_topic_;
     std::string global_localisation_service_;
     std::string start_signal_service_name_;
+    bool sift_through_caer_first_;
+    double sift_through_caer_first_percent_;
+
 
     std::string laser_z_orientation_;
     bool do_icp_;
@@ -254,6 +259,15 @@ class CultureidGlobalLocalisation
 
 
     static void local_exit(int);
+
+    /* @brief Returns the value of the CAER metric between two scans
+     * @param[in] sr [const sensor_msgs::LaserScan&] The real    scan
+     * @param[in] sv [const sensor_msgs::LaserScan&] The virtual scan
+     */
+    double caer(
+      const sensor_msgs::LaserScan::Ptr& sr,
+      const sensor_msgs::LaserScan::Ptr& sv);
+
     std::vector<double> callPythonFunc();
 
     /*****************************************************************************
@@ -735,6 +749,13 @@ class CultureidGlobalLocalisation
       const std::string& scan_method,
       const std::string& scan_context,
       const bool& do_fill_map_scan);
+
+    /*******************************************************************************
+    * @brief Takes all pose hypotheses, computes their caer against the real scan,
+    * and ranks them. Only p% of all poses are then considered for smsm
+    */
+    std::vector<geometry_msgs::Pose::Ptr> siftThroughCAER(
+      const std::vector<geometry_msgs::Pose::Ptr>& all_particles);
 
     /*****************************************************************************
     */

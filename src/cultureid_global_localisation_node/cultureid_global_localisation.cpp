@@ -60,6 +60,8 @@ CultureidGlobalLocalisation::CultureidGlobalLocalisation(
   ground_truths_latest_received_time_ (ros::Time::now()),
   robot_is_omw_(false),
   running_(false),
+  sift_through_caer_first_(false),
+  sift_through_caer_first_percent_(1.0),
   omap_(ranges::OMap(1,1)),
   omap_rot_(ranges_rot::OMap(1,1)),
   rm_(ranges::RayMarching(omap_, 1)),
@@ -172,6 +174,25 @@ CultureidGlobalLocalisation::CultureidGlobalLocalisation(
 CultureidGlobalLocalisation::~CultureidGlobalLocalisation()
 {
   ROS_INFO("[CultureidGlobal Localiser] Destroying CultureidGlobalLocalisation");
+}
+
+
+/*******************************************************************************
+*/
+double CultureidGlobalLocalisation::caer(
+  const sensor_msgs::LaserScan::Ptr& sr,
+  const sensor_msgs::LaserScan::Ptr& sv)
+{
+  assert(sr->ranges.size() == sv->ranges.size());
+
+  double c = 0;
+  for (unsigned int i = 0; i < sr->ranges.size(); i++)
+  {
+    if (sr->ranges[i] != 0.0 && sv->ranges[i] != 0.0)
+      c += fabs(sr->ranges[i] - sv->ranges[i]);
+  }
+
+  return c;
 }
 
 /*******************************************************************************
@@ -1313,11 +1334,11 @@ CultureidGlobalLocalisation::handleInputPose(const geometry_msgs::Pose::Ptr& pos
   if (!received_scan_ || !received_map_ || !received_start_signal_)
     return;
 
-  // Construct the 3rd-party ray-casters AFTER both a scan and the map is
-  // received
-  received_both_scan_and_map_++;
-  if (received_both_scan_and_map_ == 1)
-    initRangeLibRayCasters();
+/*  // Construct the 3rd-party ray-casters AFTER both a scan and the map is*/
+  //// received
+  //received_both_scan_and_map_++;
+  //if (received_both_scan_and_map_ == 1)
+    //initRangeLibRayCasters();
 
   // Return if the pose received from amcl contains nan's
   if (nanInPose(pose_msg))
@@ -1391,6 +1412,10 @@ CultureidGlobalLocalisation::initParams()
   if (!nh_private_.getParam ("global_localisation_service",
       global_localisation_service_))
     global_localisation_service_ = "/global_localization";
+  if (!nh_private_.getParam ("sift_through_caer_first", sift_through_caer_first_))
+      sift_through_caer_first_ = false;
+  if (!nh_private_.getParam ("sift_through_caer_first_percent", sift_through_caer_first_percent_))
+      sift_through_caer_first_percent_ = 1.0;
   if (!nh_private_.getParam ("laser_z_orientation", laser_z_orientation_))
     laser_z_orientation_ = "upwards";
 
@@ -2227,9 +2252,8 @@ CultureidGlobalLocalisation::poseCloudCallback(
      dispersed_particles_.push_back(pose_rigged);
      */
 
-  ROS_INFO("[CultureidGlobalLocalisation] There are %zu particles in total",
+  ROS_INFO("[CultureidGlobalLocalisation] There are %zu hypotheses in total",
     dispersed_particles_.size());
-
 
   // Process cloud if all other conditions are satisfied
   if (received_scan_ && received_map_ && received_start_signal_)
@@ -2302,6 +2326,35 @@ CultureidGlobalLocalisation::preprocessICPScans(LDP& scan_1, LDP& scan_2)
 void CultureidGlobalLocalisation::processPoseCloud()
 {
   ros::Time start = ros::Time::now();
+
+  // Construct the 3rd-party ray-casters AFTER both a scan and the map is
+  // received
+  bool cond = received_scan_          &&
+              received_pose_cloud_    &&
+              received_start_signal_  &&
+              received_map_;
+
+  if (!cond)
+    return;
+
+  initRangeLibRayCasters();
+
+  //----------------------------------------------------------------------------
+  if (sift_through_caer_first_)
+  {
+    // Do not take ALL hypotheses, but only those with the 10% best caers
+    std::vector<geometry_msgs::Pose::Ptr> caer_best_particles =
+      siftThroughCAER(dispersed_particles_);
+
+    dispersed_particles_.clear();
+    dispersed_particles_ = caer_best_particles;
+
+    ROS_INFO("[CultureidGlobalLocalisation] ... but I will consider only %zu hypotheses",
+      caer_best_particles.size());
+  }
+  //----------------------------------------------------------------------------
+
+
 
   std::vector<sm_result> outputs;
   std::vector<tf::Transform> f2bs;
@@ -2777,6 +2830,60 @@ CultureidGlobalLocalisation::scanMap(
 #endif
 
   return map_scan;
+}
+
+
+/*******************************************************************************
+ * @brief Takes all pose hypotheses, computes their caer against the real scan,
+ * and ranks them. Only p% of all poses are then considered for smsm
+ */
+  std::vector<geometry_msgs::Pose::Ptr>
+CultureidGlobalLocalisation::siftThroughCAER(
+  const std::vector<geometry_msgs::Pose::Ptr>& all_hypotheses)
+{
+  // The real scan
+  sensor_msgs::LaserScan::Ptr sr =
+    boost::make_shared<sensor_msgs::LaserScan>(*latest_world_scan_);
+
+  // Compute all caers
+  std::vector<double> caers;
+  for (unsigned int i = 0; i < all_hypotheses.size(); i++)
+  {
+    // Compute the virtual scan from pose hypothesis i
+    sensor_msgs::LaserScan::Ptr sv_i = scanMap(all_hypotheses[i],
+      icp_map_scan_method_, "translation", icp_do_fill_map_scan_);
+
+    // Compute caer for this virtual scan
+    double c = caer(sr,sv_i);
+    if (c != 0.0)
+      caers.push_back(c);
+    else
+      caers.push_back(10000000000000000000000000000000.0);
+
+    sv_i.reset();
+  }
+
+  // Sort all caers and get the original indices of all sorted caer values
+  std::vector<size_t> idx(caers.size());
+  std::iota(idx.begin(), idx.end(), 0);
+
+  std::stable_sort(
+    idx.begin(),
+    idx.end(),
+    [&caers](size_t i1,size_t i2) {return caers[i1] < caers[i2];});
+
+
+
+  // The top p% of lowest caers in size
+  unsigned int p_size =
+    static_cast<unsigned int>(sift_through_caer_first_percent_*all_hypotheses.size());
+
+  // The top p% of lowest caers in hypotheses
+  std::vector<geometry_msgs::Pose::Ptr> caer_best_particles;
+  for (unsigned int i = 0; i < p_size; i++)
+    caer_best_particles.push_back(all_hypotheses[idx[i]]);
+
+  return caer_best_particles;
 }
 
 

@@ -1,5 +1,3 @@
-num_hypotheses: 500
-
 # reference frames
 fixed_frame: "map"
 base_frame: "base_footprint"
@@ -13,6 +11,11 @@ input_pose_topic: "/amcl_pose"
 input_pose_cloud_topic: "/particlecloud"
 start_signal_service_name: "/start_signal"
 global_localisation_service: "/global_localization"
+
+# Do not smsm num_hypotheses; sift them through the caer first, and transfer
+# int(sift_through_caer_first_percent*num_hypotheses) poses for smsm
+sift_through_caer_first: true
+sift_through_caer_first_percent: 0.01
 
 # global pose retrieval method (do_icp AND do_fmt should equal FALSE)
 do_icp: true
