@@ -3,6 +3,7 @@
   <arg name="robot_type" />
   <arg name="gazebo_world" />
 
+  <arg name="map_resolution"          value="0.01"                if="$(eval gazebo_world == 'vergina')" />
   <arg name="map_resolution"          value="0.01"                if="$(eval gazebo_world == 'csal_pgl')" />
   <arg name="map_resolution"          value="0.01"                if="$(eval gazebo_world == 'fmt_corridor')" />
   <arg name="map_resolution"          value="0.01"                if="$(eval gazebo_world == 'fmt_home_karto3')" />
